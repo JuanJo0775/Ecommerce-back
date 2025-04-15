@@ -61,42 +61,40 @@ def find_relevant_products(self, query_text):
     return list(products)
 
 @api_view(['POST'])
+@permission_classes([AllowAny])
 def chatbot_message(request):
-    user_message = request.data.get('message')
-    session_id = request.data.get('session_id')
+    """
+    Endpoint para procesar mensajes del chatbot.
     
-    # Intentar usar Rasa si está configurado
-    try:
-        if hasattr(settings, 'RASA_API_URL'):
-            rasa_response = requests.post(
-                f"{settings.RASA_API_URL}/webhooks/rest/webhook",
-                json={"sender": session_id, "message": user_message}
-            ).json()
-            
-            response_text = rasa_response[0]['text'] if rasa_response else None
-        else:
-            response_text = None
-    except Exception as e:
-        print(f"Error al comunicarse con Rasa: {e}")
-        response_text = None
+    Recibe un mensaje del usuario y retorna una respuesta generada.
+    """
+    serializer = ChatbotMessageInputSerializer(data=request.data)
     
-    # Si Rasa no está disponible o falla, usar nuestro chatbot básico
-    if not response_text:
-        # Usar tu servicio de chatbot existente
-        from .chatbot_service import chatbot_service
-        chatbot_response = chatbot_service.generate_response(user_message, session_id)
-        response_text = chatbot_response['response']
+    if not serializer.is_valid():
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
     
-    # Buscar productos relevantes basados en la consulta
-    products = []
-    if "producto" in user_message.lower() or "busco" in user_message.lower():
-        products = find_relevant_products(user_message)
+    user_message = serializer.validated_data['message']
+    session_id = serializer.validated_data.get('session_id')
     
-    return Response({
-        "response": response_text,
-        "session_id": session_id,
-        "suggested_products": [p.id for p in products]
-    })
+    # Obtener respuesta del servicio de chatbot
+    chatbot_response = chatbot_service.generate_response(user_message, session_id)
+    
+    # Si el usuario está autenticado, asociar la conversación con el usuario
+    if request.user.is_authenticated:
+        # Buscar conversación por session_id y asociarla con el usuario
+        try:
+            conversation = ChatbotConversation.objects.get(session_id=chatbot_response['session_id'])
+            if not conversation.user:
+                conversation.user = request.user
+                conversation.save()
+        except ChatbotConversation.DoesNotExist:
+            pass
+    
+    # Serializar y retornar la respuesta
+    response_serializer = ChatbotResponseSerializer(data=chatbot_response)
+    response_serializer.is_valid(raise_exception=True)
+    
+    return Response(response_serializer.data)
 
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
