@@ -652,3 +652,13 @@ def paypal_payment_callback(request):
         transaction.status = 'cancelled'  
         transaction.save()
         return Response({'error': 'Invalid payment details'}, status=400)
+    
+
+@api_view(["GET"])
+def product_detail_by_id(request, product_id):
+    try:
+        product = Product.objects.get(id=product_id)
+        serializer = ProductSerializer(product)
+        return Response(serializer.data)
+    except Product.DoesNotExist:
+        return Response({"error": "Producto no encontrado"}, status=404)

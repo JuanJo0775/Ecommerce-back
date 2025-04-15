@@ -23,6 +23,7 @@ urlpatterns = [
     path("initiate_epayco_payment/", views.initiate_epayco_payment, name="initiate_epayco_payment"),
     path("epayco_callback/", views.epayco_callback, name="epayco_callback"),
     path("verify_epayco_payment/", views.verify_epayco_payment, name="verify_epayco_payment"),
+     path("product_detail_by_id/<int:product_id>/", views.product_detail_by_id, name="product_detail_by_id"),
     
     # Rutas del chatbot
     path("chatbot/message/", chatbot_views.chatbot_message, name="chatbot_message"),
