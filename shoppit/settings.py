@@ -57,9 +57,9 @@ MIDDLEWARE = [
 
 CORS_ALLOWED_ORIGINS = [
 "http://localhost:5173",
-"http://localhost:5174",
-"http://localhost:5175",
-"http://localhost:5176", 
+# "http://localhost:5174",
+# "http://localhost:5175",
+# "http://localhost:5176", 
 ]
 
 ROOT_URLCONF = 'shoppit.urls'
@@ -154,3 +154,11 @@ SIMPLE_JWT = {
 PAYPAL_CLIENT_ID = 'AZlmaNlgqCupMNcSevVdOVMKTlOfq6OUYavey0Y-02qV9oiXknJg3kL0KpsXX-Wc3gynW6_68rGfPyjc'
 PAYPAL_CLIENT_SECRET = 'EB-WLpgqSl-xLR2aljo6dGcKPoV9Hg_Ia2CRnZwozOWzL4OGNeRxqVgJRC1y_IaNbw1Jc39v5oV77YxN'
 PAYPAL_MODE = 'sandbox'  
+
+EPAYCO_CONFIG = {
+    'p_cust_id_cliente': '1549926',
+    'p_key': '2e5d8dfdb0fcd8801ba5bf67cf6a8bf527441258',
+    'public_key': 'eb43b80670c96ea90584f1a12b5ef814',
+    'private_key': 'caf0ec010bb0e1fe9d3e015a7342e584',
+    'test': True  # Cambiar a False en producción
+}

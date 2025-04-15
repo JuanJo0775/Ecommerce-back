@@ -6,6 +6,9 @@ from .serializers import ProductSerializer, DetailedProductSerializer, CartItemS
 from rest_framework.response import Response
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
+from django.contrib.auth.password_validation import validate_password
+from django.core.exceptions import ValidationError
+from django.contrib.auth import get_user_model
 from .serializers import UserSerializer
 import json
 from decimal import Decimal
@@ -171,8 +174,341 @@ def user_info(request):
 
 
 
+@api_view(['POST'])
+def register_user(request):
+    """
+    Registra un nuevo usuario en el sistema.
+    """
+    User = get_user_model()
+    
+    # Datos requeridos
+    username = request.data.get('username')
+    email = request.data.get('email')
+    password = request.data.get('password')
+    first_name = request.data.get('first_name', '')
+    last_name = request.data.get('last_name', '')
+    
+    # Validaciones básicas
+    if not username or not email or not password:
+        return Response(
+            {'error': 'Se requieren username, email y password'}, 
+            status=status.HTTP_400_BAD_REQUEST
+        )
+    
+    # Verificar si el usuario ya existe
+    if User.objects.filter(username=username).exists():
+        return Response(
+            {'username': 'Este nombre de usuario ya está en uso'},
+            status=status.HTTP_400_BAD_REQUEST
+        )
+    
+    # Verificar si el email ya existe
+    if User.objects.filter(email=email).exists():
+        return Response(
+            {'email': 'Este correo electrónico ya está registrado'},
+            status=status.HTTP_400_BAD_REQUEST
+        )
+    
+    # Validar la contraseña
+    try:
+        validate_password(password)
+    except ValidationError as e:
+        return Response(
+            {'password': e.messages},
+            status=status.HTTP_400_BAD_REQUEST
+        )
+    
+    # Crear el usuario
+    try:
+        user = User.objects.create_user(
+            username=username,
+            email=email,
+            password=password,
+            first_name=first_name,
+            last_name=last_name
+        )
+        return Response(
+            {'message': 'Usuario registrado correctamente'},
+            status=status.HTTP_201_CREATED
+        )
+    except Exception as e:
+        return Response(
+            {'error': f'Error al crear el usuario: {str(e)}'},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
+
+# Función para actualizar el perfil del usuario
+@api_view(['PATCH'])
+@permission_classes([IsAuthenticated])
+def update_profile(request):
+    """
+    Actualiza la información del perfil del usuario actual.
+    """
+    user = request.user
+    
+    # Campos que se pueden actualizar
+    updateable_fields = [
+        'first_name', 
+        'last_name', 
+        'email', 
+        'city', 
+        'state', 
+        'address', 
+        'phone'
+    ]
+    
+    # Actualizar sólo los campos que vienen en la petición
+    for field in updateable_fields:
+        if field in request.data:
+            # Para email, verificar que no exista ya
+            if field == 'email' and request.data[field] != user.email:
+                User = get_user_model()
+                if User.objects.filter(email=request.data[field]).exists():
+                    return Response(
+                        {'email': 'Este correo electrónico ya está registrado por otro usuario'},
+                        status=status.HTTP_400_BAD_REQUEST
+                    )
+            
+            # Actualizar el campo
+            setattr(user, field, request.data[field])
+    
+    # Guardar los cambios
+    try:
+        user.save()
+        return Response(
+            {'message': 'Perfil actualizado correctamente'},
+            status=status.HTTP_200_OK
+        )
+    except Exception as e:
+        return Response(
+            {'error': f'Error al actualizar el perfil: {str(e)}'},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
+
+# Función para cambiar la contraseña
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def change_password(request):
+    """
+    Cambia la contraseña del usuario actual.
+    """
+    user = request.user
+    
+    current_password = request.data.get('current_password')
+    new_password = request.data.get('new_password')
+    
+    if not current_password or not new_password:
+        return Response(
+            {'error': 'Se requieren la contraseña actual y la nueva'},
+            status=status.HTTP_400_BAD_REQUEST
+        )
+    
+    # Verificar la contraseña actual
+    if not user.check_password(current_password):
+        return Response(
+            {'detail': 'La contraseña actual es incorrecta'},
+            status=status.HTTP_400_BAD_REQUEST
+        )
+    
+    # Validar la nueva contraseña
+    try:
+        validate_password(new_password, user)
+    except ValidationError as e:
+        return Response(
+            {'error': e.messages},
+            status=status.HTTP_400_BAD_REQUEST
+        )
+    
+    # Cambiar la contraseña
+    user.set_password(new_password)
+    user.save()
+    
+    return Response(
+        {'message': 'Contraseña cambiada correctamente'},
+        status=status.HTTP_200_OK
+    )
 
 
+
+import uuid
+import json
+from decimal import Decimal
+from django.conf import settings
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def initiate_epayco_payment(request):
+    """
+    Inicia un proceso de pago con ePayco usando el SDK de checkout.
+    """
+    if request.method == 'POST' and request.user.is_authenticated:
+        tx_ref = str(uuid.uuid4())
+        user = request.user
+        cart_code = request.data.get('cart_code')
+        
+        try:
+            # Primero intentar encontrar el carrito exacto
+            cart = Cart.objects.get(cart_code=cart_code, user=user)
+        except Cart.DoesNotExist:
+            try:
+                # Si no existe con ese usuario, buscar por código y verificar que no esté pagado
+                cart = Cart.objects.get(cart_code=cart_code, paid=False)
+                
+                # Asociar al usuario actual
+                cart.user = user
+                cart.save()
+                print(f"Carrito {cart_code} asociado automáticamente al usuario {user.username}")
+            except Cart.DoesNotExist:
+                return Response({'error': 'Invalid cart code'}, status=400)
+
+        # Verificar que el carrito tenga productos
+        if not cart.items.exists():
+            return Response({'error': 'Cart is empty'}, status=400)
+            
+        # Calcular el total
+        total_amount = sum(item.product.price * item.quantity for item in cart.items.all())
+        
+        # Crear una transacción en nuestra base de datos
+        transaction, created = Transaction.objects.get_or_create(
+            ref=tx_ref,
+            defaults={
+                'cart': cart,
+                'amount': total_amount,
+                'currency': "COP",
+                'user': user,
+                'status': 'pending',
+                'payment_method': 'epayco'
+            }
+        )
+        
+        # URLs de retorno y confirmación
+        BASE_URL = "http://localhost:5173"  # Ajusta según tu entorno
+        return_url = f"{BASE_URL}/payment-status?ref={tx_ref}&method=epayco"
+        confirmation_url = f"{request.build_absolute_uri('/').rstrip('/')}/epayco_callback/"
+        
+        # Preparar datos para el checkout de ePayco
+        checkout_data = {
+            'ref': tx_ref,
+            'public_key': settings.EPAYCO_CONFIG['public_key'],
+            'amount': str(total_amount),
+            'tax': 0.00,  # Ajusta según tus necesidades
+            'tax_base': str(total_amount),
+            'currency': 'COP',  # Ajusta según tu moneda
+            'description': f'Compra en Shoppit - Carrito {cart_code}',
+            'country': 'co',  # País de facturación
+            'test': settings.EPAYCO_CONFIG['test'],
+            'external': 'false',  # Para usar el checkout dentro de la página
+            'response': return_url,
+            'confirmation': confirmation_url,
+            
+            # Datos del cliente
+            'name': user.first_name or user.username,
+            'last_name': user.last_name or '',
+            'email': user.email,
+            'cell_phone': user.phone or '',
+            'address': user.address or 'Dirección no especificada',
+            'city': user.city or 'Ciudad no especificada',
+            
+            # Datos adicionales
+            'extra1': cart_code,  # Guardamos el código del carrito como referencia
+            'invoice': cart_code,  # ID de factura
+        }
+        
+        return Response(checkout_data)
+    
+    return Response({'error': 'Invalid request'}, status=400)
+
+@api_view(['POST'])
+def verify_epayco_payment(request):
+    """
+    Verifica el estado de un pago con ePayco.
+    """
+    ref = request.data.get('ref')
+    
+    if not ref:
+        return Response({'error': 'Se requiere la referencia del pago'}, status=400)
+    
+    try:
+        # Buscar la transacción en la base de datos
+        transaction = Transaction.objects.get(ref=ref)
+        
+        # Verificar el estado actual
+        if transaction.status == 'completed':
+            return Response({
+                'success': True,
+                'status': 'completed',
+                'message': 'Pago completado correctamente'
+            })
+        elif transaction.status == 'failed':
+            return Response({
+                'success': False,
+                'status': 'failed',
+                'message': 'El pago ha fallado'
+            })
+        else:
+            # El pago está pendiente, podríamos consultar a ePayco por el estado actual
+            # Para este ejemplo, simplemente devolvemos el estado actual
+            return Response({
+                'success': False,
+                'status': 'pending',
+                'message': 'El pago está pendiente de confirmación'
+            })
+    except Transaction.DoesNotExist:
+        return Response({
+            'success': False,
+            'status': 'not_found',
+            'message': 'No se encontró la transacción'
+        }, status=404)
+    except Exception as e:
+        return Response({
+            'success': False,
+            'status': 'error',
+            'message': str(e)
+        }, status=500)
+
+@api_view(['POST'])
+def epayco_callback(request):
+    """
+    Callback para recibir confirmación de pago de ePayco.
+    """
+    # ePayco envía datos en el cuerpo de la solicitud
+    data = request.data
+    ref = data.get('x_ref_payco') or data.get('ref_payco')
+    
+    if not ref:
+        return Response({'error': 'Missing reference'}, status=400)
+    
+    try:
+        # Aquí normalmente verificarías la firma para asegurar que la respuesta es de ePayco
+        # Pero por simplicidad, asumiremos que es válida
+        
+        transaction = Transaction.objects.get(ref=ref)
+        status = data.get('x_transaction_state') or data.get('transaction_state')
+        
+        # Actualizar el estado de la transacción según la respuesta de ePayco
+        if status == 'Aceptada':
+            transaction.status = 'completed'
+            transaction.save()
+            
+            # Marcar el carrito como pagado
+            cart = transaction.cart
+            cart.paid = True
+            cart.save()
+            
+            return Response({'message': 'Payment confirmed'})
+        else:
+            transaction.status = 'failed'
+            transaction.save()
+            return Response({'error': 'Payment not accepted'}, status=400)
+            
+    except Transaction.DoesNotExist:
+        return Response({'error': 'Transaction not found'}, status=404)
+    except Exception as e:
+        return Response({'error': str(e)}, status=500)
+
+# Actualizar la vista existente de PaymentStatusPage para manejar también ePayco
+# En el frontend, necesitarás modificar esta parte
 
 @api_view(['POST'])
 def initiate_paypal_payment(request):

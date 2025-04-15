@@ -16,8 +16,10 @@ urlpatterns = [
     path('associate_cart_to_user/', views.associate_cart_to_user, name='associate_cart_to_user'),
     path("initiate_paypal_payment/", views.initiate_paypal_payment, name="initiate_paypal_payment"),
     path("paypal_payment_callback/", views.paypal_payment_callback, name="paypal_payment_callback"),
+    path("register/", views.register_user, name="register_user"),
+    path("update_profile/", views.update_profile, name="update_profile"),
+    path("change_password/", views.change_password, name="change_password"),
+    path("initiate_epayco_payment/", views.initiate_epayco_payment, name="initiate_epayco_payment"),
+    path("epayco_callback/", views.epayco_callback, name="epayco_callback"),
+    path("verify_epayco_payment/", views.verify_epayco_payment, name="verify_epayco_payment"),
 ]
-
-# fetching all_products: http://127.0.0.1:8001/products
-
-
