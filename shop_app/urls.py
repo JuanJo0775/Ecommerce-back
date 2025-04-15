@@ -1,5 +1,6 @@
 from django.urls import path
 from . import views
+from . import chatbot_views
 
 urlpatterns = [
     path("products", views.products, name="products"),
@@ -22,4 +23,9 @@ urlpatterns = [
     path("initiate_epayco_payment/", views.initiate_epayco_payment, name="initiate_epayco_payment"),
     path("epayco_callback/", views.epayco_callback, name="epayco_callback"),
     path("verify_epayco_payment/", views.verify_epayco_payment, name="verify_epayco_payment"),
+    
+    # Rutas del chatbot
+    path("chatbot/message/", chatbot_views.chatbot_message, name="chatbot_message"),
+    path("chatbot/history/", chatbot_views.chatbot_history, name="chatbot_history"),
+    path("chatbot/feedback/<int:conversation_id>/", chatbot_views.chatbot_feedback, name="chatbot_feedback"),
 ]
