@@ -2,72 +2,27 @@ from rest_framework.decorators import api_view, permission_classes
 from rest_framework.response import Response
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticated, AllowAny
-from .chatbot_service import ChatbotService
-from .chatbot_models import ChatbotFAQ, ChatbotConversation, ChatbotMessage
+from .hybrid_langchain_service import HybridLangChainService  # Importar el servicio híbrido
+from .chatbot_models import ChatbotConversation, ChatbotMessage
 from .chatbot_serializers import (
     ChatbotMessageInputSerializer, 
     ChatbotResponseSerializer,
     ChatbotConversationSerializer
 )
-import requests
-from django.conf import settings
+from django.utils import timezone
+import logging
 
+# Configurar logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
-chatbot_service = ChatbotService()
-
-from rest_framework.decorators import api_view
-from rest_framework.response import Response
-import requests
-from django.conf import settings
-
-def find_relevant_products(self, query_text):
-    """Busca productos relevantes basados en la consulta del usuario."""
-    if not query_text:
-        return []
-    
-    # Importar lo necesario dentro de la función
-    from django.db.models import Q
-    from .models import Product  # Asegúrate de que la ruta de importación sea correcta
-
-    processed_text = self.preprocess_text(query_text)
-    words = processed_text.split()
-    
-    # Ignorar palabras muy comunes y cortas
-    common_words = ['el', 'la', 'los', 'las', 'un', 'una', 'unos', 'unas', 
-                   'y', 'o', 'de', 'del', 'para', 'por', 'con', 'sin']
-    
-    search_words = [word for word in words 
-                   if word not in common_words and len(word) > 3]
-    
-    if not search_words:
-        return []
-    
-    # Construir consulta dinámica
-    query_filter = None
-    
-    for word in search_words:
-        if query_filter is None:
-            query_filter = Q(name__icontains=word) | Q(description__icontains=word)
-        else:
-            query_filter |= Q(name__icontains=word) | Q(description__icontains=word)
-    
-    # Si no hay palabras de búsqueda válidas, retornar lista vacía
-    if query_filter is None:
-        return []
-    
-    # Realizar búsqueda limitada a 5 productos
-    products = Product.objects.filter(query_filter).distinct()[:5]
-    
-    return list(products)
+# Inicializar el servicio híbrido
+hybrid_service = HybridLangChainService()
 
 @api_view(['POST'])
 @permission_classes([AllowAny])
 def chatbot_message(request):
-    """
-    Endpoint para procesar mensajes del chatbot.
-    
-    Recibe un mensaje del usuario y retorna una respuesta generada.
-    """
+    """Endpoint para procesar mensajes del chatbot."""
     serializer = ChatbotMessageInputSerializer(data=request.data)
     
     if not serializer.is_valid():
@@ -76,25 +31,52 @@ def chatbot_message(request):
     user_message = serializer.validated_data['message']
     session_id = serializer.validated_data.get('session_id')
     
-    # Obtener respuesta del servicio de chatbot
-    chatbot_response = chatbot_service.generate_response(user_message, session_id)
+    logger.info(f"Mensaje recibido: '{user_message}' para sesión {session_id}")
     
-    # Si el usuario está autenticado, asociar la conversación con el usuario
-    if request.user.is_authenticated:
-        # Buscar conversación por session_id y asociarla con el usuario
-        try:
-            conversation = ChatbotConversation.objects.get(session_id=chatbot_response['session_id'])
-            if not conversation.user:
-                conversation.user = request.user
-                conversation.save()
-        except ChatbotConversation.DoesNotExist:
-            pass
+    try:
+        # Obtener respuesta usando el servicio híbrido
+        chatbot_response = hybrid_service.process_message(user_message, session_id)
+        
+        # Guardar conversación en la base de datos
+        conversation, created = ChatbotConversation.objects.get_or_create(
+            session_id=chatbot_response['session_id'],
+            defaults={'started_at': timezone.now()}
+        )
+        
+        # Guardar mensaje del usuario
+        ChatbotMessage.objects.create(
+            conversation=conversation,
+            sender='user',
+            message=user_message
+        )
+        
+        # Guardar respuesta del bot
+        ChatbotMessage.objects.create(
+            conversation=conversation,
+            sender='bot',
+            message=chatbot_response['response']
+        )
+        
+        # Asociar usuario si está autenticado
+        if request.user.is_authenticated and not conversation.user:
+            conversation.user = request.user
+            conversation.save()
+        
+        # Serializar y retornar la respuesta
+        response_serializer = ChatbotResponseSerializer(data=chatbot_response)
+        if response_serializer.is_valid():
+            return Response(response_serializer.data)
+        else:
+            logger.error(f"Error de serialización: {response_serializer.errors}")
+            return Response(response_serializer.errors, status=status.HTTP_400_BAD_REQUEST)
     
-    # Serializar y retornar la respuesta
-    response_serializer = ChatbotResponseSerializer(data=chatbot_response)
-    response_serializer.is_valid(raise_exception=True)
-    
-    return Response(response_serializer.data)
+    except Exception as e:
+        logger.error(f"Error al procesar mensaje: {e}")
+        return Response({
+            'response': 'Lo siento, estoy teniendo problemas para responder en este momento. Por favor, intenta de nuevo más tarde.',
+            'session_id': session_id or 'error_session',
+            'suggested_products': []
+        })
 
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
