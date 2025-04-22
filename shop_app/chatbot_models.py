@@ -1,4 +1,5 @@
 from django.db import models
+from django.conf import settings
 
 class ChatbotFAQ(models.Model):
     """
@@ -19,19 +20,12 @@ class ChatbotFAQ(models.Model):
         
     def __str__(self):
         return self.question
-        
-    def get_keywords_list(self):
-        """Retorna una lista de las palabras clave limpias."""
-        if not self.keywords:
-            return []
-        return [keyword.strip().lower() for keyword in self.keywords.split(',')]
-
 
 class ChatbotConversation(models.Model):
     """
     Modelo para almacenar conversaciones con el chatbot.
     """
-    user = models.ForeignKey('core.CustomUser', on_delete=models.CASCADE, 
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, 
                             blank=True, null=True, related_name='chatbot_conversations')
     session_id = models.CharField(max_length=100, verbose_name="ID de sesión")
     started_at = models.DateTimeField(auto_now_add=True)
@@ -45,7 +39,6 @@ class ChatbotConversation(models.Model):
         
     def __str__(self):
         return f"Conversación {self.id} - {self.session_id[:10]}"
-
 
 class ChatbotMessage(models.Model):
     """

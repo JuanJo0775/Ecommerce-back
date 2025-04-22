@@ -29,4 +29,5 @@ urlpatterns = [
     path("chatbot/message/", chatbot_views.chatbot_message, name="chatbot_message"),
     path("chatbot/history/", chatbot_views.chatbot_history, name="chatbot_history"),
     path("chatbot/feedback/<int:conversation_id>/", chatbot_views.chatbot_feedback, name="chatbot_feedback"),
+    path("chatbot/product_query/", chatbot_views.product_query, name="product_query"),
 ]

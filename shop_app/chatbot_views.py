@@ -2,7 +2,28 @@ from rest_framework.decorators import api_view, permission_classes
 from rest_framework.response import Response
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticated, AllowAny
-from .hybrid_langchain_service import HybridLangChainService  # Importar el servicio híbrido
+try:
+    from .ChatbotService import ChatbotService
+    # Inicializar el servicio de chatbot
+    chatbot_service = ChatbotService()
+except ImportError as e:
+    from django.utils.module_loading import import_string
+    import logging
+    logging.basicConfig(level=logging.ERROR)
+    logger = logging.getLogger(__name__)
+    logger.error(f"Error importando servicio de chatbot: {e}")
+    # Definir un servicio mínimo de respaldo
+    class MinimalChatService:
+        def process_message(self, message, session_id=None):
+            return {
+                'response': "Lo siento, el servicio de chatbot no está completamente configurado. Por favor contacta al administrador.",
+                'session_id': session_id or 'error_session',
+                'suggested_products': []
+            }
+        def find_products(self, query):
+            return []
+    chatbot_service = MinimalChatService()
+
 from .chatbot_models import ChatbotConversation, ChatbotMessage
 from .chatbot_serializers import (
     ChatbotMessageInputSerializer, 
@@ -10,19 +31,11 @@ from .chatbot_serializers import (
     ChatbotConversationSerializer
 )
 from django.utils import timezone
-import logging
-
-# Configurar logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
-
-# Inicializar el servicio híbrido
-hybrid_service = HybridLangChainService()
 
 @api_view(['POST'])
 @permission_classes([AllowAny])
 def chatbot_message(request):
-    """Endpoint para procesar mensajes del chatbot."""
+    """Endpoint para procesar mensajes del chatbot con lenguaje natural."""
     serializer = ChatbotMessageInputSerializer(data=request.data)
     
     if not serializer.is_valid():
@@ -31,11 +44,12 @@ def chatbot_message(request):
     user_message = serializer.validated_data['message']
     session_id = serializer.validated_data.get('session_id')
     
-    logger.info(f"Mensaje recibido: '{user_message}' para sesión {session_id}")
-    
     try:
-        # Obtener respuesta usando el servicio híbrido
-        chatbot_response = hybrid_service.process_message(user_message, session_id)
+        # Procesar el mensaje con el servicio de chatbot
+        chatbot_response = chatbot_service.process_message(
+            user_message, 
+            session_id=session_id
+        )
         
         # Guardar conversación en la base de datos
         conversation, created = ChatbotConversation.objects.get_or_create(
@@ -67,11 +81,11 @@ def chatbot_message(request):
         if response_serializer.is_valid():
             return Response(response_serializer.data)
         else:
-            logger.error(f"Error de serialización: {response_serializer.errors}")
             return Response(response_serializer.errors, status=status.HTTP_400_BAD_REQUEST)
     
     except Exception as e:
-        logger.error(f"Error al procesar mensaje: {e}")
+        import traceback
+        logger.error(f"Error en chatbot_message: {e}\n{traceback.format_exc()}")
         return Response({
             'response': 'Lo siento, estoy teniendo problemas para responder en este momento. Por favor, intenta de nuevo más tarde.',
             'session_id': session_id or 'error_session',
@@ -124,3 +138,47 @@ def chatbot_feedback(request, conversation_id):
     conversation.save()
     
     return Response({'message': 'Feedback guardado correctamente'})
+
+@api_view(['POST'])
+@permission_classes([AllowAny])
+def product_query(request):
+    """
+    Endpoint específico para consultar productos en lenguaje natural.
+    """
+    query = request.data.get('query', '')
+    
+    if not query or len(query) < 3:
+        return Response({
+            'products': [],
+            'message': 'La consulta es demasiado corta'
+        }, status=status.HTTP_400_BAD_REQUEST)
+    
+    try:
+        # Utilizamos el mismo servicio para encontrar productos
+        products = chatbot_service.find_products(query)
+        
+        # Serializar los resultados para devolverlos
+        from .serializers import ProductSerializer
+        serializer = ProductSerializer(products, many=True)
+        
+        # Crear una respuesta contextual
+        if products:
+            if len(products) == 1:
+                message = f"He encontrado este producto que coincide con tu búsqueda: {products[0].name}"
+            else:
+                message = f"He encontrado {len(products)} productos que coinciden con tu búsqueda."
+        else:
+            message = "No he encontrado productos que coincidan con esa descripción. Intenta con otros términos."
+        
+        return Response({
+            'products': serializer.data,
+            'count': len(products),
+            'message': message,
+            'query': query
+        })
+    except Exception as e:
+        logger.error(f"Error en product_query: {e}")
+        return Response({
+            'error': 'Error al procesar la consulta de productos',
+            'message': str(e)
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)

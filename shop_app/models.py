@@ -6,7 +6,7 @@ from django.conf import settings
 class Product(models.Model):
     CATEGORY = (
         ("Electronics", "ELECTRONICS"),
-        ("Groceries", "GROCERIES"),
+        ("Home", "HOME"),
         ("Clothings", "CLOTHINGS")
     )
 

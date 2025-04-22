@@ -25,6 +25,7 @@ class ChatbotFAQSerializer(serializers.ModelSerializer):
 class ChatbotMessageInputSerializer(serializers.Serializer):
     message = serializers.CharField(required=True)
     session_id = serializers.CharField(required=False)
+    use_ai = serializers.BooleanField(required=False, default=True)
     
 
 class ChatbotResponseSerializer(serializers.Serializer):
