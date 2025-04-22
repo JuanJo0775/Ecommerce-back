@@ -3,7 +3,7 @@ from rest_framework.response import Response
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticated, AllowAny
 try:
-    from .ChatbotService import ChatbotService
+    from .Chatbot_rule_service import ChatbotService
     # Inicializar el servicio de chatbot
     chatbot_service = ChatbotService()
 except ImportError as e:
